@@ -1,4 +1,4 @@
-/* Copyright (c) 1996-2016, OPC Foundation. All rights reserved.
+/* Copyright (c) 1996-2019 The OPC Foundation. All rights reserved.
    The source code in this file is covered under a dual-license scenario:
      - RCL: for OPC Foundation members in good-standing
      - GPL V2: everybody else
@@ -22,7 +22,7 @@ namespace Opc.Ua
     /// <summary>
     /// Validates certificates.
     /// </summary>
-    public class CertificateValidator
+    public class CertificateValidator : X509CertificateValidator
     {
         #region Constructors
         /// <summary>
@@ -31,7 +31,7 @@ namespace Opc.Ua
         public CertificateValidator()
         {
             m_validatedCertificates = new Dictionary<string, X509Certificate2>();
-            m_disallowSHA1SignedCertificates = CertificateFactory.defaultHashSize >= 256;
+            m_rejectSHA1SignedCertificates = CertificateFactory.defaultHashSize >= 256;
             m_minimumCertificateKeySize = CertificateFactory.defaultKeySize;
         }
         #endregion
@@ -56,6 +56,28 @@ namespace Opc.Ua
                 lock (m_callbackLock)
                 {
                     m_CertificateValidation -= value;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Raised when an application certificate update occurs.
+        /// </summary>
+        public event CertificateUpdateEventHandler CertificateUpdate
+        {
+            add
+            {
+                lock (m_callbackLock)
+                {
+                    m_CertificateUpdate += value;
+                }
+            }
+
+            remove
+            {
+                lock (m_callbackLock)
+                {
+                    m_CertificateUpdate -= value;
                 }
             }
         }
@@ -141,7 +163,7 @@ namespace Opc.Ua
                     configuration.TrustedIssuerCertificates,
                     configuration.TrustedPeerCertificates,
                     configuration.RejectedCertificateStore);
-                m_disallowSHA1SignedCertificates = configuration.DisallowSHA1SignedCertificates;
+                m_rejectSHA1SignedCertificates = configuration.RejectSHA1SignedCertificates;
                 m_minimumCertificateKeySize = configuration.MinimumCertificateKeySize;
             }
 
@@ -152,10 +174,33 @@ namespace Opc.Ua
         }
 
         /// <summary>
+        /// Updates the validator with a new application certificate.
+        /// </summary>
+        public virtual async Task UpdateCertificate(SecurityConfiguration securityConfiguration)
+        {
+            lock (m_lock)
+            {
+                securityConfiguration.ApplicationCertificate.Certificate = null;
+            }
+
+            await Update(securityConfiguration);
+
+            lock (m_callbackLock)
+            {
+                if (m_CertificateUpdate != null)
+                {
+                    var args = new CertificateUpdateEventArgs(securityConfiguration, GetChannelValidator());
+                    m_CertificateUpdate(this, args);
+                }
+            }
+        }
+
+
+        /// <summary>
         /// Validates the specified certificate against the trust list.
         /// </summary>
         /// <param name="certificate">The certificate.</param>
-        public virtual void Validate(X509Certificate2 certificate)
+        public override void Validate(X509Certificate2 certificate)
         {
             Validate(new X509Certificate2Collection() { certificate });
         }
@@ -191,7 +236,7 @@ namespace Opc.Ua
                     InternalValidate(chain).Wait();
 
                     // add to list of validated certificates.
-                    m_validatedCertificates[certificate.Thumbprint] = certificate;
+                    m_validatedCertificates[certificate.Thumbprint] = new X509Certificate2(certificate.RawData);
                 }
             }
             catch (AggregateException ae)
@@ -381,7 +426,7 @@ namespace Opc.Ua
         }
 
         /// <summary>
-        /// Returns the authority key identifier in the certificate.
+        /// Returns the subject key identifier in the certificate.
         /// </summary>
         private X509SubjectKeyIdentifierExtension FindSubjectKeyIdentifierExtension(X509Certificate2 certificate)
         {
@@ -475,11 +520,13 @@ namespace Opc.Ua
                         issuer = await GetIssuer(certificate, collection, null, true);
                     }
                 }
+                else
+                {
+                    isTrusted = true;
+                }
 
                 if (issuer != null)
                 {
-                    isTrusted = true;
-
                     issuers.Add(issuer);
                     certificate = await issuer.Find(false);
 
@@ -488,10 +535,6 @@ namespace Opc.Ua
                     {
                         break;
                     }
-                }
-                else
-                {
-                    isTrusted = false;
                 }
             }
             while (issuer != null);
@@ -661,17 +704,14 @@ namespace Opc.Ua
             }
 
             // check if minimum requirements are met
-            if (m_disallowSHA1SignedCertificates && IsSHA1SignatureAlgorithm(certificate.SignatureAlgorithm))
+            if (m_rejectSHA1SignedCertificates && IsSHA1SignatureAlgorithm(certificate.SignatureAlgorithm))
             {
                 throw new ServiceResultException(StatusCodes.BadSecurityChecksFailed, "SHA1 signed certificates are not trusted");
             }
 
-            using (RSA rsa = certificate.GetRSAPublicKey())
+            if (certificate.GetRSAPublicKey().KeySize < m_minimumCertificateKeySize)
             {
-                if (rsa.KeySize < m_minimumCertificateKeySize)
-                {
-                    throw new ServiceResultException(StatusCodes.BadSecurityChecksFailed, "Certificate doesn't meet minimum key length requirement");
-                }
+                throw new ServiceResultException(StatusCodes.BadSecurityChecksFailed, "Certificate doesn't meet minimum key length requirement");
             }
 
             CertificateIdentifier trustedCertificate = await GetTrustedCertificate(certificate);
@@ -778,14 +818,13 @@ namespace Opc.Ua
             }
         }
 
-
         /// <summary>
         /// Returns an object that can be used with WCF channel.
         /// </summary>
         [System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Design", "CA1024:UsePropertiesWhereAppropriate")]
         public X509CertificateValidator GetChannelValidator()
         {
-            return new WcfValidatorWrapper(this);
+            return this as X509CertificateValidator;
         }
         #endregion
 
@@ -817,9 +856,21 @@ namespace Opc.Ua
 
                 case X509ChainStatusFlags.UntrustedRoot:
                     {
+                        // self signed cert signature validation 
+                        // .Net Core ChainStatus returns NotSignatureValid only on Windows, 
+                        // so we have to do the extra cert signature check on all platforms
+                        if (issuer == null && !isIssuer &&
+                            id.Certificate != null && Utils.CompareDistinguishedName(id.Certificate.Subject, id.Certificate.Subject))
+                        {
+                            if (!IsSignatureValid(id.Certificate))
+                            {
+                                goto case X509ChainStatusFlags.NotSignatureValid;
+                            }
+                        }
+
                         // ignore this error because the root check is done
                         // by looking the certificate up in the trusted issuer stores passed to the validator.
-                        // the ChainStatus uses the Windows trusted issuer stores.
+                        // the ChainStatus uses the trusted issuer stores.
                         break;
                     }
 
@@ -884,6 +935,13 @@ namespace Opc.Ua
                             status.StatusInformation);
                     }
 
+                case X509ChainStatusFlags.NotSignatureValid:
+                    {
+                        return ServiceResult.Create(
+                            StatusCodes.BadCertificateUntrusted,
+                            status.StatusInformation);
+                    }
+
                 default:
                     {
                         return ServiceResult.Create(
@@ -908,25 +966,12 @@ namespace Opc.Ua
                 oid.Value == "1.3.14.3.2.13" ||        // sha1DSA
                 oid.Value == "1.3.14.3.2.27";          // dsaSHA1
         }
-        #endregion
-
-        #region WcfValidatorWrapper Class
         /// <summary>
-        /// Wraps a WCF validator so the validator can be used in WCF bindings.
+        /// Returns if a self signed certificate is properly signed.
         /// </summary>
-        internal class WcfValidatorWrapper : X509CertificateValidator
+        private static bool IsSignatureValid(X509Certificate2 cert)
         {
-            public WcfValidatorWrapper(CertificateValidator validator)
-            {
-                m_validator = validator;
-            }
-
-            public override void Validate(X509Certificate2 certificate)
-            {
-                m_validator.Validate(certificate);
-            }
-
-            private CertificateValidator m_validator;
+            return CertificateFactory.VerifySelfSigned(cert);
         }
         #endregion
 
@@ -940,8 +985,9 @@ namespace Opc.Ua
         private CertificateIdentifierCollection m_issuerCertificateList;
         private CertificateStoreIdentifier m_rejectedCertificateStore;
         private event CertificateValidationEventHandler m_CertificateValidation;
+        private event CertificateUpdateEventHandler m_CertificateUpdate;
         private X509Certificate2 m_applicationCertificate;
-        private bool m_disallowSHA1SignedCertificates;
+        private bool m_rejectSHA1SignedCertificates;
         private ushort m_minimumCertificateKeySize;
         #endregion
     }
@@ -997,9 +1043,61 @@ namespace Opc.Ua
         #endregion
     }
 
+
     /// <summary>
     /// Used to handled certificate validation errors.
     /// </summary>
     public delegate void CertificateValidationEventHandler(CertificateValidator sender, CertificateValidationEventArgs e);
     #endregion
+
+    #region CertificateUpdateEventArgs Class
+    /// <summary>
+    /// The event arguments provided when a certificate validation error occurs.
+    /// </summary>
+    public class CertificateUpdateEventArgs : EventArgs
+    {
+        #region Constructors
+        /// <summary>
+        /// Creates a new instance.
+        /// </summary>
+        internal CertificateUpdateEventArgs(
+            SecurityConfiguration configuration,
+            X509CertificateValidator validator)
+        {
+            m_configuration = configuration;
+            m_validator = validator;
+        }
+        #endregion
+
+        #region Public Properties
+        /// <summary>
+        /// The new security configuration.
+        /// </summary>
+        public SecurityConfiguration SecurityConfiguration
+        {
+            get { return m_configuration; }
+        }
+        /// <summary>
+        /// The new certificate validator.
+        /// </summary>
+        public X509CertificateValidator CertificateValidator
+        {
+            get { return m_validator; }
+        }
+        #endregion
+
+        #region Private Fields
+        private SecurityConfiguration m_configuration;
+        private X509CertificateValidator m_validator;
+        #endregion
+    }
+
+
+    /// <summary>
+    /// Used to handle certificate update events.
+    /// </summary>
+    public delegate void CertificateUpdateEventHandler(CertificateValidator sender, CertificateUpdateEventArgs e);
+
+    #endregion
+
 }

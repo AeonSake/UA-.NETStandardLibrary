@@ -1,4 +1,4 @@
-/* Copyright (c) 1996-2016, OPC Foundation. All rights reserved.
+/* Copyright (c) 1996-2019 The OPC Foundation. All rights reserved.
    The source code in this file is covered under a dual-license scenario:
      - RCL: for OPC Foundation members in good-standing
      - GPL V2: everybody else
@@ -350,7 +350,7 @@ namespace Opc.Ua.Test
                     actualDimensions[ii] = (int)arrayDimensions[ii];
                 }
 
-                if (actualDimensions[ii] == 0)
+                while (actualDimensions[ii] == 0)
                 {
                     actualDimensions[ii] = m_random.NextInt32(m_maxArrayLength);
                 }
@@ -703,8 +703,20 @@ namespace Opc.Ua.Test
         {
             return CreateString(GetRandomLocale(), false);
         }
+        public string GetRandomString(string locale)
+        {
+            return CreateString(locale, false);
+        }
+        public string GetRandomSymbol()
+        {
+            return CreateString(GetRandomLocale(), true);
+        }
+        public string GetRandomSymbol(string locale)
+        {
+            return CreateString(locale, false);
+        }
         #endregion
-        
+
         #region DateTime
         /// <summary cref="GetRandom(Type)" />
         [System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Design", "CA1024:UsePropertiesWhereAppropriate")]

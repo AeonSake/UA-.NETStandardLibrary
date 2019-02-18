@@ -1,4 +1,4 @@
-/* Copyright (c) 1996-2016, OPC Foundation. All rights reserved.
+/* Copyright (c) 1996-2019 The OPC Foundation. All rights reserved.
    The source code in this file is covered under a dual-license scenario:
      - RCL: for OPC Foundation members in good-standing
      - GPL V2: everybody else
@@ -896,7 +896,7 @@ namespace Opc.Ua
         private Dictionary<ExpandedNodeId,ServiceDefinition> m_supportedServices;
         private IServiceHostBase m_host;
         private IServerBase m_server;
-        private const string g_ImplementationString = "Opc.Ua.EndpointBase WCF Service " + AssemblyVersionInfo.CurrentVersion;
+        private string g_ImplementationString = "Opc.Ua.EndpointBase WCF Service " + Utils.GetAssemblySoftwareVersion();
         #endregion
     }
 }

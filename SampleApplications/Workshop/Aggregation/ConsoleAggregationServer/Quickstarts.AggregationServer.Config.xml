@@ -14,26 +14,26 @@
     <!-- Where the application instance certificate is stored (MachineDefault) -->
     <ApplicationCertificate>
       <StoreType>Directory</StoreType>
-      <StorePath>OPC Foundation/CertificateStores/MachineDefault</StorePath>
-      <SubjectName>CN=Quickstart Aggregation Server, C=US, S=Arizona, L="16101 N. 82nd Street, Scottsdale", O=OPC Foundation, DC=localhost</SubjectName>
+      <StorePath>OPC Foundation/pki/own</StorePath>
+      <SubjectName>CN=Quickstart Aggregation Server, C=US, S=Arizona, O=OPC Foundation, DC=localhost</SubjectName>
     </ApplicationCertificate>
 
     <!-- Where the issuer certificate are stored (certificate authorities) -->
     <TrustedIssuerCertificates>
       <StoreType>Directory</StoreType>
-      <StorePath>OPC Foundation/CertificateStores/UA Certificate Authorities</StorePath>
+      <StorePath>OPC Foundation/pki/issuer</StorePath>
     </TrustedIssuerCertificates>
 
     <!-- Where the trust list is stored (UA Applications) -->
     <TrustedPeerCertificates>
       <StoreType>Directory</StoreType>
-      <StorePath>OPC Foundation/CertificateStores/UA Applications</StorePath>
+      <StorePath>OPC Foundation/pki/trusted</StorePath>
     </TrustedPeerCertificates>
 
     <!-- The directory used to store invalid certficates for later review by the administrator. -->
     <RejectedCertificateStore>
       <StoreType>Directory</StoreType>
-      <StorePath>OPC Foundation/CertificateStores/RejectedCertificates</StorePath>
+      <StorePath>OPC Foundation/pki/rejected</StorePath>
     </RejectedCertificateStore>
 
     <!-- WARNING: The following setting (to automatically accept untrusted certificates) should be used
@@ -60,38 +60,23 @@
     <SecurityPolicies>
       <ServerSecurityPolicy>
         <SecurityMode>SignAndEncrypt_3</SecurityMode>
-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15</SecurityPolicyUri>
-        <SecurityLevel>4</SecurityLevel>
-      </ServerSecurityPolicy>
-      <ServerSecurityPolicy>
-        <SecurityMode>Sign_2</SecurityMode>
-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256</SecurityPolicyUri>
-        <SecurityLevel>2</SecurityLevel>
+        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256</SecurityPolicyUri>
       </ServerSecurityPolicy>
       <ServerSecurityPolicy>
         <SecurityMode>None_1</SecurityMode>
         <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#None</SecurityPolicyUri>
-        <SecurityLevel>0</SecurityLevel>
-      </ServerSecurityPolicy>
-      <ServerSecurityPolicy>
-        <SecurityMode>Sign_2</SecurityMode>
-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15</SecurityPolicyUri>
-        <SecurityLevel>1</SecurityLevel>
-      </ServerSecurityPolicy>
-      <ServerSecurityPolicy>
-        <SecurityMode>SignAndEncrypt_3</SecurityMode>
-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256</SecurityPolicyUri>
-        <SecurityLevel>5</SecurityLevel>
       </ServerSecurityPolicy>
       <ServerSecurityPolicy>
         <SecurityMode>Sign_2</SecurityMode>
         <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256</SecurityPolicyUri>
-        <SecurityLevel>3</SecurityLevel>
+      </ServerSecurityPolicy>
+      <ServerSecurityPolicy>
+        <SecurityMode>Sign_2</SecurityMode>
+        <SecurityPolicyUri></SecurityPolicyUri>
       </ServerSecurityPolicy>
       <ServerSecurityPolicy>
         <SecurityMode>SignAndEncrypt_3</SecurityMode>
-        <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256</SecurityPolicyUri>
-        <SecurityLevel>6</SecurityLevel>
+        <SecurityPolicyUri></SecurityPolicyUri>
       </ServerSecurityPolicy>
     </SecurityPolicies>
     
@@ -172,7 +157,6 @@
       <ua:SecurityMode>SignAndEncrypt_3</ua:SecurityMode>
       <ua:SecurityPolicyUri />
       <ua:UserIdentityTokens />
-      <ua:SecurityLevel>1</ua:SecurityLevel>
     </RegistrationEndpoint>
 
     <MaxRegistrationInterval>30000</MaxRegistrationInterval>
@@ -182,6 +166,18 @@
     <MaxPublishRequestCount>20</MaxPublishRequestCount>
     <MaxSubscriptionCount>100</MaxSubscriptionCount>
     <MaxEventQueueSize>10000</MaxEventQueueSize>
+    
+    <ShutdownDelay>5</ShutdownDelay>
+    <ServerCapabilities>
+      <ua:String>NA</ua:String>
+    </ServerCapabilities>
+    <SupportedPrivateKeyFormats>
+      <ua:String>PFX</ua:String>
+      <ua:String>PEM</ua:String>
+    </SupportedPrivateKeyFormats>
+    <MaxTrustListSize>0</MaxTrustListSize>
+    <MultiCastDnsEnabled>false</MultiCastDnsEnabled>
+
   </ServerConfiguration>
 
   <ClientConfiguration>
@@ -201,7 +197,7 @@
             <ua:Endpoint>
               <EndpointUrl>opc.tcp://localhost:51210/UA/SampleServer</EndpointUrl>
               <SecurityMode>SignAndEncrypt_3</SecurityMode>
-              <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15</SecurityPolicyUri>
+              <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256</SecurityPolicyUri>
               <UserIdentityTokens>
                 <UserTokenPolicy>
                   <TokenType>Anonymous_0</TokenType>
@@ -214,7 +210,6 @@
                 </UserTokenPolicy>
               </UserIdentityTokens>
               <TransportProfileUri>http://opcfoundation.org/UA/profiles/transport/wsxmlorbinary</TransportProfileUri>
-              <SecurityLevel>0</SecurityLevel>
             </ua:Endpoint>
             <ua:UpdateBeforeConnect>true</ua:UpdateBeforeConnect>
             <ua:SelectedUserTokenPolicy>0</ua:SelectedUserTokenPolicy>
@@ -223,7 +218,7 @@
             <ua:Endpoint>
               <EndpointUrl>opc.tcp://localhost:61210/UA/SampleClient</EndpointUrl>
               <SecurityMode>SignAndEncrypt_3</SecurityMode>
-              <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15</SecurityPolicyUri>
+              <SecurityPolicyUri>http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256</SecurityPolicyUri>
               <UserIdentityTokens>
                 <UserTokenPolicy>
                   <TokenType>Anonymous_0</TokenType>
@@ -236,7 +231,6 @@
                 </UserTokenPolicy>
               </UserIdentityTokens>
               <TransportProfileUri>http://opcfoundation.org/UA/profiles/transport/wsxmlorbinary</TransportProfileUri>
-              <SecurityLevel>0</SecurityLevel>
             </ua:Endpoint>
             <ua:UpdateBeforeConnect>true</ua:UpdateBeforeConnect>
             <ua:SelectedUserTokenPolicy>0</ua:SelectedUserTokenPolicy>

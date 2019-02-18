@@ -1,5 +1,5 @@
 /* ========================================================================
- * Copyright (c) 2005-2016 The OPC Foundation, Inc. All rights reserved.
+ * Copyright (c) 2005-2019 The OPC Foundation, Inc. All rights reserved.
  *
  * OPC Foundation MIT License 1.00
  * 
@@ -279,6 +279,13 @@ namespace Opc.Ua.Server
                     throw new ServiceResultException(StatusCodes.BadSessionClosed);
                 }
 
+                // check if session timeout has expired.
+                if (session.HasExpired)
+                {
+                    m_server.CloseSession(null, session.Id, false);
+                    throw new ServiceResultException(StatusCodes.BadSessionClosed);
+                }
+
                 // create new server nonce.
                 serverNonce = Utils.Nonce.CreateNonce((uint)m_minNonceLength);
 
@@ -402,9 +409,6 @@ namespace Opc.Ua.Server
                 // raise session related event.
                 RaiseSessionEvent(session, SessionEventReason.Closing);
 
-                // remember activation
-                bool activated = session.Activated;
-
                 // close the session.
                 session.Close();
 
@@ -412,11 +416,6 @@ namespace Opc.Ua.Server
                 lock (m_server.DiagnosticsWriteLock)
                 {
                     m_server.ServerDiagnostics.CurrentSessionCount--;
-                }
-
-                if (!activated)
-                {
-                    throw new ServiceResultException(StatusCodes.BadSessionNotActivated);
                 }
             }
 

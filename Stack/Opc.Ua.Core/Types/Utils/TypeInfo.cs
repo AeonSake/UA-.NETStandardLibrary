@@ -1,4 +1,4 @@
-/* Copyright (c) 1996-2016, OPC Foundation. All rights reserved.
+/* Copyright (c) 1996-2019 The OPC Foundation. All rights reserved.
    The source code in this file is covered under a dual-license scenario:
      - RCL: for OPC Foundation members in good-standing
      - GPL V2: everybody else
@@ -1248,7 +1248,7 @@ namespace Opc.Ua
                 case BuiltInType.QualifiedName: { return QualifiedName.Null; }
                 case BuiltInType.LocalizedText: { return LocalizedText.Null; }
                 case BuiltInType.Variant: { return Variant.Null; }
-                case BuiltInType.DataValue: { return new DataValue(); }
+                case BuiltInType.DataValue: { return null; }
                 case BuiltInType.Enumeration: { return (int)0; }
                 case BuiltInType.Number: { return (double)0; }
                 case BuiltInType.Integer: { return (long)0; }

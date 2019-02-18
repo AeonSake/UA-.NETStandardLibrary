@@ -1,5 +1,5 @@
 /* ========================================================================
- * Copyright (c) 2005-2016 The OPC Foundation, Inc. All rights reserved.
+ * Copyright (c) 2005-2019 The OPC Foundation, Inc. All rights reserved.
  *
  * OPC Foundation MIT License 1.00
  * 
@@ -78,7 +78,7 @@ typedef FILETIME  DateTime;
 // ENUM:    Type
 // PURPOSE: Defines the set of possible XML data types.
 
-typedef enum Type
+enum Type
 {
     XML_EMPTY    = 0x0000,
     XML_BOOLEAN  = 0x0001,

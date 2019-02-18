@@ -1,5 +1,5 @@
 /* ========================================================================
- * Copyright (c) 2005-2016 The OPC Foundation, Inc. All rights reserved.
+ * Copyright (c) 2005-2019 The OPC Foundation, Inc. All rights reserved.
  *
  * OPC Foundation MIT License 1.00
  * 
@@ -255,6 +255,27 @@ namespace Opc.Ua.Configuration
 
         #region Public Methods
         /// <summary>
+        /// Processes the command line.
+        /// </summary>
+        /// <returns>
+        /// True if the arguments were processed; False otherwise.
+        /// </returns>
+        public bool ProcessCommandLine()
+        {
+            // ignore processing of command line
+            return false;
+        }
+
+        /// <summary>
+        /// Starts the UA server as a Windows Service.
+        /// </summary>
+        /// <param name="server">The server.</param>
+        public void StartAsService(ServerBase server)
+        {
+            throw new NotImplementedException(".NetStandard Opc.Ua libraries do not support to start as a windows service");
+        }
+
+        /// <summary>
         /// Starts the UA server.
         /// </summary>
         /// <param name="server">The server.</param>
@@ -267,7 +288,7 @@ namespace Opc.Ua.Configuration
                 await LoadApplicationConfiguration(false);
             }
 
-            if (m_applicationConfiguration.SecurityConfiguration != null && m_applicationConfiguration.SecurityConfiguration.AutoAcceptUntrustedCertificates)
+            if (m_applicationConfiguration.CertificateValidator != null)
             {
                 m_applicationConfiguration.CertificateValidator.CertificateValidation += CertificateValidator_CertificateValidation;
             }
@@ -328,9 +349,10 @@ namespace Opc.Ua.Configuration
 
                 try
                 {
-                    if (configuration.SecurityConfiguration != null && configuration.SecurityConfiguration.AutoAcceptUntrustedCertificates)
+                    if (configuration.CertificateValidator != null)
                     {
-                        configuration.CertificateValidator.CertificateValidation += CertificateValidator_CertificateValidation;
+                        ApplicationInstance applicationInstance = new ApplicationInstance(configuration);
+                        configuration.CertificateValidator.CertificateValidation += applicationInstance.CertificateValidator_CertificateValidation;
                     }
 
                     m_server.Start(configuration);
@@ -341,7 +363,6 @@ namespace Opc.Ua.Configuration
                     Utils.Trace((int)Utils.TraceMasks.Error, error.ToLongString());
                 }
             }
-
             #endregion
 
             #region Private Fields
@@ -704,19 +725,9 @@ namespace Opc.Ua.Configuration
             else
             {
                 // ensure the certificate is trusted.
-                await AddToTrustedStore(configuration, certificate);
-            }
-
-            // add to discovery server.
-            if (configuration.ApplicationType == ApplicationType.Server || configuration.ApplicationType == ApplicationType.ClientAndServer)
-            {
-                try
+                if (configuration.SecurityConfiguration.AddAppCertToTrustedStore)
                 {
-                    await AddToDiscoveryServerTrustList(certificate, null, null, configuration.SecurityConfiguration.TrustedPeerCertificates);
-                }
-                catch (Exception e)
-                {
-                    Utils.Trace(e, "Could not add certificate to LDS trust list.");
+                    await AddToTrustedStore(configuration, certificate);
                 }
             }
 
@@ -887,7 +898,7 @@ namespace Opc.Ua.Configuration
                 throw ServiceResultException.Create(StatusCodes.BadConfigurationError, "Could not load configuration file.");
             }
 
-            m_applicationConfiguration = configuration;
+            m_applicationConfiguration = FixupAppConfig(configuration);
 
             return configuration;
         }
@@ -915,9 +926,11 @@ namespace Opc.Ua.Configuration
         /// </summary>
         /// <param name="silent">if set to <c>true</c> no dialogs will be displayed.</param>
         /// <param name="minimumKeySize">Minimum size of the key.</param>
+        /// <param name="lifeTimeInMonths">The lifetime in months.</param>
         public async Task<bool> CheckApplicationInstanceCertificate(
             bool silent,
-            ushort minimumKeySize)
+            ushort minimumKeySize,
+            ushort lifeTimeInMonths = CertificateFactory.defaultLifeTime)
         {
             Utils.Trace(Utils.TraceMasks.Information, "Checking application instance certificate.");
 
@@ -992,7 +1005,7 @@ namespace Opc.Ua.Configuration
 
             if ((certificate == null) || !certificateValid)
             {
-                certificate = await CreateApplicationInstanceCertificate(configuration, minimumKeySize);
+                certificate = await CreateApplicationInstanceCertificate(configuration, minimumKeySize, lifeTimeInMonths);
 
                 if (certificate == null)
                 {
@@ -1008,20 +1021,10 @@ namespace Opc.Ua.Configuration
             }
             else
             {
-                // ensure it is trusted.
-                await AddToTrustedStore(configuration, certificate);
-            }
-
-            // add to discovery server.
-            if (configuration.ApplicationType == ApplicationType.Server || configuration.ApplicationType == ApplicationType.ClientAndServer)
-            {
-                try
+                if (configuration.SecurityConfiguration.AddAppCertToTrustedStore)
                 {
-                    await AddToDiscoveryServerTrustList(certificate, null, null, configuration.SecurityConfiguration.TrustedPeerCertificates);
-                }
-                catch (Exception e)
-                {
-                    Utils.Trace(e, "Could not add certificate to LDS trust list.");
+                    // ensure it is trusted.
+                    await AddToTrustedStore(configuration, certificate);
                 }
             }
 
@@ -1033,11 +1036,13 @@ namespace Opc.Ua.Configuration
         /// <summary>
         /// Handles a certificate validation error.
         /// </summary>
-        private static void CertificateValidator_CertificateValidation(CertificateValidator validator, CertificateValidationEventArgs e)
+        private void CertificateValidator_CertificateValidation(CertificateValidator validator, CertificateValidationEventArgs e)
         {
             try
             {
-                if (e.Error != null && e.Error.Code == StatusCodes.BadCertificateUntrusted)
+                if (m_applicationConfiguration.SecurityConfiguration != null
+                    && m_applicationConfiguration.SecurityConfiguration.AutoAcceptUntrustedCertificates
+                    && e.Error != null && e.Error.Code == StatusCodes.BadCertificateUntrusted)
                 {
                     e.Accept = true;
                     Utils.Trace((int)Utils.TraceMasks.Security, "Automatically accepted certificate: {0}", e.Certificate.Subject);
@@ -1230,7 +1235,7 @@ namespace Opc.Ua.Configuration
             Utils.Trace(Utils.TraceMasks.Information, "Creating application instance certificate.");
 
             // delete any existing certificate.
-            DeleteApplicationInstanceCertificate(configuration);
+            await DeleteApplicationInstanceCertificate(configuration);
 
             CertificateIdentifier id = configuration.SecurityConfiguration.ApplicationCertificate;
 
@@ -1251,17 +1256,27 @@ namespace Opc.Ua.Configuration
             X509Certificate2 certificate = CertificateFactory.CreateCertificate(
                 id.StoreType,
                 id.StorePath,
+                null,
                 configuration.ApplicationUri,
                 configuration.ApplicationName,
                 id.SubjectName,
                 serverDomainNames,
                 minimumKeySize,
-                lifeTimeInMonths
+                DateTime.UtcNow - TimeSpan.FromDays(1),
+                lifeTimeInMonths,
+                CertificateFactory.defaultHashSize,
+                false,
+                null,
+                null
                 );
 
             id.Certificate = certificate;
 
-            await AddToTrustedStore(configuration, certificate);
+            // ensure the certificate is trusted.
+            if (configuration.SecurityConfiguration.AddAppCertToTrustedStore)
+            {
+                await AddToTrustedStore(configuration, certificate);
+            }
 
             await configuration.CertificateValidator.Update(configuration.SecurityConfiguration);
 
@@ -1277,7 +1292,7 @@ namespace Opc.Ua.Configuration
         /// Deletes an existing application instance certificate.
         /// </summary>
         /// <param name="configuration">The configuration instance that stores the configurable information for a UA application.</param>
-        private static async void DeleteApplicationInstanceCertificate(ApplicationConfiguration configuration)
+        private static async Task DeleteApplicationInstanceCertificate(ApplicationConfiguration configuration)
         {
             Utils.Trace(Utils.TraceMasks.Information, "Deleting application instance certificate.");
 
@@ -1315,121 +1330,6 @@ namespace Opc.Ua.Configuration
                 {
                     await store.Delete(certificate.Thumbprint);
                 }
-            }
-        }
-
-        /// <summary>
-        /// Adds the application certificate to the discovery server trust list.
-        /// </summary>
-        public static async Task AddToDiscoveryServerTrustList(
-            X509Certificate2 certificate,
-            string oldThumbprint,
-            IList<X509Certificate2> issuers,
-            CertificateStoreIdentifier trustedCertificateStore)
-        {
-            Utils.Trace(Utils.TraceMasks.Information, "Adding certificate to discovery server trust list.");
-
-            try
-            {
-                string configurationPath = Utils.GetAbsoluteFilePath(Directory.GetCurrentDirectory() + Path.DirectorySeparatorChar + "OPC Foundation" + Path.DirectorySeparatorChar + "Config" + Path.DirectorySeparatorChar + "Opc.Ua.DiscoveryServer.Config.xml", true, false, false);
-                if (configurationPath == null)
-                {
-                    Utils.Trace("Could not find the discovery server configuration file. Please confirm that it is installed.");
-                }
-                else
-                {
-                    Opc.Ua.Security.SecuredApplication ldsConfiguration = new Opc.Ua.Security.SecurityConfigurationManager().ReadConfiguration(configurationPath);
-                    CertificateStoreIdentifier csid = Opc.Ua.Security.SecuredApplication.FromCertificateStoreIdentifier(ldsConfiguration.TrustedCertificateStore);
-                    await AddApplicationCertificateToStore(csid, certificate, oldThumbprint);
-
-                    if (issuers != null && ldsConfiguration.IssuerCertificateStore != null)
-                    {
-                        csid = Opc.Ua.Security.SecuredApplication.FromCertificateStoreIdentifier(ldsConfiguration.IssuerCertificateStore);
-                        AddIssuerCertificatesToStore(csid, issuers);
-                    }
-
-                    CertificateIdentifier cid = Opc.Ua.Security.SecuredApplication.FromCertificateIdentifier(ldsConfiguration.ApplicationCertificate);
-                    X509Certificate2 ldsCertificate = await cid.Find(false);
-
-                    // add LDS certificate to application trust list.
-                    if (ldsCertificate != null && trustedCertificateStore != null)
-                    {
-                        await AddApplicationCertificateToStore(csid, ldsCertificate, null);
-                    }
-                }
-            }
-            catch (Exception e)
-            {
-                Utils.Trace(e, "Could not add certificate to discovery server trust list.");
-            }
-        }
-
-        /// <summary>
-        /// Adds an application certificate to a store.
-        /// </summary>
-        private static async Task AddApplicationCertificateToStore(
-            CertificateStoreIdentifier csid,
-            X509Certificate2 certificate,
-            string oldThumbprint)
-        {
-            ICertificateStore store = csid.OpenStore();
-
-            try
-            {
-                // delete the old certificate.
-                if (oldThumbprint != null)
-                {
-                    await store.Delete(oldThumbprint);
-                }
-
-                // delete certificates with the same application uri.
-                if (store.FindByThumbprint(certificate.Thumbprint) == null)
-                {
-                    string applicationUri = Utils.GetApplicationUriFromCertificate(certificate);
-
-                    // delete any existing certificates.
-                    X509Certificate2Collection collection = await store.Enumerate();
-                    foreach (X509Certificate2 target in collection)
-                    {
-                        if (Utils.CompareDistinguishedName(target.Subject, certificate.Subject))
-                        {
-                            if (Utils.GetApplicationUriFromCertificate(target) == applicationUri)
-                            {
-                                await store.Delete(target.Thumbprint);
-                            }
-                        }
-                    }
-
-                    // add new certificate.
-                    await store.Add(new X509Certificate2(certificate.RawData));
-                }
-            }
-            finally
-            {
-                store.Close();
-            }
-        }
-
-        /// <summary>
-        /// Adds an application certificate to a store.
-        /// </summary>
-        private static void AddIssuerCertificatesToStore(CertificateStoreIdentifier csid, IList<X509Certificate2> issuers)
-        {
-            ICertificateStore store = csid.OpenStore();
-
-            try
-            {
-                foreach (X509Certificate2 issuer in issuers)
-                {
-                    if (store.FindByThumbprint(issuer.Thumbprint) == null)
-                    {
-                        store.Add(issuer);
-                    }
-                }
-            }
-            finally
-            {
-                store.Close();
             }
         }
 

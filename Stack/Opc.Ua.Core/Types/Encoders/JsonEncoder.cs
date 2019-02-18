@@ -1,4 +1,4 @@
-/* Copyright (c) 1996-2016, OPC Foundation. All rights reserved.
+/* Copyright (c) 1996-2019 The OPC Foundation. All rights reserved.
    The source code in this file is covered under a dual-license scenario:
      - RCL: for OPC Foundation members in good-standing
      - GPL V2: everybody else
@@ -32,6 +32,7 @@ namespace Opc.Ua
         private ServiceMessageContext m_context;
         private ushort[] m_namespaceMappings;
         private ushort[] m_serverMappings;
+        private uint m_nestingLevel;
         #endregion
 
         public bool UseReversibleEncoding { get; private set; }
@@ -45,6 +46,7 @@ namespace Opc.Ua
             Initialize();
 
             m_context = context;
+            m_nestingLevel = 0;
             m_writer = writer;
             UseReversibleEncoding = useReversibleEncoding;
 
@@ -246,7 +248,7 @@ namespace Opc.Ua
         /// </summary>
         public EncodingType EncodingType
         {
-            get { return EncodingType.Xml; }
+            get { return EncodingType.Json; }
         }
 
         /// <summary>
@@ -729,11 +731,22 @@ namespace Opc.Ua
         /// </summary>
         public void WriteDiagnosticInfo(string fieldName, DiagnosticInfo value)
         {
+            // check the nesting level for avoiding a stack overflow.
+            if (m_nestingLevel > m_context.MaxEncodingNestingLevels)
+            {
+                throw ServiceResultException.Create(
+                    StatusCodes.BadEncodingLimitsExceeded,
+                    "Maximum nesting level of {0} was exceeded",
+                    m_context.MaxEncodingNestingLevels);
+            }
+
             if (value == null)
             {
                 WriteSimpleField(fieldName, null, false);
                 return;
             }
+
+            m_nestingLevel++;
 
             PushStructure(fieldName);
 
@@ -773,6 +786,8 @@ namespace Opc.Ua
             }
 
             PopStructure();
+
+            m_nestingLevel--;
         }
 
         /// <summary>
@@ -790,7 +805,7 @@ namespace Opc.Ua
 
             if (UseReversibleEncoding)
             {
-                WriteSimpleField("Name", value.Name.ToString(), false);
+                WriteString("Name", value.Name);
 
                 if (value.NamespaceIndex > 0)
                 {
@@ -799,7 +814,7 @@ namespace Opc.Ua
             }
             else
             {
-                WriteSimpleField("Name", value.Name.ToString(), false);
+                WriteString("Name", value.Name);
                 WriteNamespaceIndex(value.NamespaceIndex);
             }
 
@@ -821,31 +836,42 @@ namespace Opc.Ua
             {
                 PushStructure(fieldName);
 
-                WriteSimpleField("Text", value.Text.ToString(), true);
+                WriteString("Text", value.Text);
 
                 if (!String.IsNullOrEmpty(value.Locale))
                 {
-                    WriteSimpleField("Locale", value.Locale.ToString(), true);
+                    WriteString("Locale", value.Locale);
                 }
 
                 PopStructure();
             }
             else
             {
-                WriteSimpleField(fieldName, value.Text, true);
+                WriteString(fieldName, value.Text);
             }
         }
 
         /// <summary>
-        /// Writes an Variant array to the stream.
+        /// Writes an Variant to the stream.
         /// </summary>
         public void WriteVariant(string fieldName, Variant value)
         {
+            // check the nesting level for avoiding a stack overflow.
+            if (m_nestingLevel > m_context.MaxEncodingNestingLevels)
+            {
+                throw ServiceResultException.Create(
+                    StatusCodes.BadEncodingLimitsExceeded,
+                    "Maximum nesting level of {0} was exceeded",
+                    m_context.MaxEncodingNestingLevels);
+            }
+
             if (Variant.Null == value)
             {
                 WriteSimpleField(fieldName, null, false);
                 return;
             }
+
+            m_nestingLevel++;
 
             bool isNull = (value.TypeInfo == null || value.TypeInfo.BuiltInType == BuiltInType.Null || value.Value == null);
 
@@ -881,6 +907,8 @@ namespace Opc.Ua
 
                 PopStructure();
             }
+
+            m_nestingLevel--;
         }
 
         /// <summary>
@@ -987,11 +1015,23 @@ namespace Opc.Ua
         /// </summary>
         public void WriteEncodeable(string fieldName, IEncodeable value, System.Type systemType)
         {
+            // check the nesting level for avoiding a stack overflow.
+            if (m_nestingLevel > m_context.MaxEncodingNestingLevels)
+            {
+                throw ServiceResultException.Create(
+                    StatusCodes.BadEncodingLimitsExceeded,
+                    "Maximum nesting level of {0} was exceeded",
+                    m_context.MaxEncodingNestingLevels);
+            }
+
+
             if (value == null)
             {
                 WriteSimpleField(fieldName, null, false);
                 return;
             }
+
+            m_nestingLevel++;
 
             PushStructure(fieldName);
 
@@ -1001,6 +1041,8 @@ namespace Opc.Ua
             }
 
             PopStructure();
+
+            m_nestingLevel--;
         }
 
         /// <summary>

@@ -1,5 +1,5 @@
 /* ========================================================================
- * Copyright (c) 2005-2016 The OPC Foundation, Inc. All rights reserved.
+ * Copyright (c) 2005-2019 The OPC Foundation, Inc. All rights reserved.
  *
  * OPC Foundation MIT License 1.00
  * 
@@ -954,7 +954,7 @@ namespace Opc.Ua.Server
                     // only support external references to nodes that are stored in memory.
                     if (source == null || !source.Validated || source.Node == null)
                     {
-                        return;
+                        continue;
                     }
                     
                     // add reference to external target.
@@ -1799,7 +1799,7 @@ namespace Opc.Ua.Server
                         }
                     }
 
-                    Utils.Trace("WRITE: Value={0} Range={1}", nodeToWrite.Value.WrappedValue, nodeToWrite.IndexRange);
+                    Utils.TraceDebug("WRITE: Value={0} Range={1}", nodeToWrite.Value.WrappedValue, nodeToWrite.IndexRange);
 
                     PropertyState propertyState = handle.Node as PropertyState;
                     object previousPropertyValue = null;
@@ -1823,6 +1823,11 @@ namespace Opc.Ua.Server
                         nodeToWrite.AttributeId,
                         nodeToWrite.ParsedIndexRange,
                         nodeToWrite.Value);
+
+                    if (errors[ii].StatusCode != StatusCodes.Good)
+                    {
+                        continue;
+                    }
 
                     if (propertyState != null)
                     {

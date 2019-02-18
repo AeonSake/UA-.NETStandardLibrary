@@ -1,4 +1,4 @@
-/* Copyright (c) 1996-2016, OPC Foundation. All rights reserved.
+/* Copyright (c) 1996-2019 The OPC Foundation. All rights reserved.
    The source code in this file is covered under a dual-license scenario:
      - RCL: for OPC Foundation members in good-standing
      - GPL V2: everybody else
@@ -569,7 +569,7 @@ namespace Opc.Ua
             }
 
             MessageSecurityMode securityMode = MessageSecurityMode.SignAndEncrypt;
-            string securityPolicyUri = SecurityPolicies.Basic128Rsa15;
+            string securityPolicyUri = SecurityPolicies.Basic256Sha256;
             bool useBinaryEncoding = true;
 
             if (!String.IsNullOrEmpty(parameters))
@@ -815,7 +815,7 @@ namespace Opc.Ua
                 {
                     m_description.EndpointUrl = url.ToString();
                     m_description.SecurityMode = MessageSecurityMode.SignAndEncrypt;
-                    m_description.SecurityPolicyUri = SecurityPolicies.Basic128Rsa15;
+                    m_description.SecurityPolicyUri = SecurityPolicies.Basic256Sha256;
                     m_description.UserIdentityTokens.Add(new UserTokenPolicy(UserTokenType.Anonymous));
 
                     if (url.Scheme == Utils.UriSchemeHttps)
@@ -1122,7 +1122,7 @@ namespace Opc.Ua
                     // third pass - match based on security level.
                     foreach (EndpointDescription description in matches)
                     {
-                        if (description.SecurityMode > match.SecurityMode)
+                        if (description.SecurityLevel > match.SecurityLevel)
                         {
                             match = description;
                         }

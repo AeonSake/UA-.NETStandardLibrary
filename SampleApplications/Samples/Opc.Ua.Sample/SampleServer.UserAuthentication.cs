@@ -1,5 +1,5 @@
 /* ========================================================================
- * Copyright (c) 2005-2016 The OPC Foundation, Inc. All rights reserved.
+ * Copyright (c) 2005-2019 The OPC Foundation, Inc. All rights reserved.
  *
  * OPC Foundation MIT License 1.00
  * 
@@ -47,53 +47,22 @@ namespace Opc.Ua.Sample
             {
                 UserTokenPolicy policy = configuration.ServerConfiguration.UserTokenPolicies[ii];
 
-                // ignore policies without an explicit id.
-                if (String.IsNullOrEmpty(policy.PolicyId))
-                {
-                    continue;
-                }
-                
-                // create a validator for an issued token policy.
-                if (policy.TokenType == UserTokenType.IssuedToken)
-                {
-                    // the name of the element in the configuration file.
-                    XmlQualifiedName qname = new XmlQualifiedName(policy.PolicyId, Namespaces.OpcUa);
-
-                    // find the id for the issuer certificate.
-                    CertificateIdentifier id = configuration.ParseExtension<CertificateIdentifier>(qname);
-                    
-                    if (id == null)
-                    {
-                        Utils.Trace(
-                            (int)Utils.TraceMasks.Error, 
-                            "Could not load CertificateIdentifier for UserTokenPolicy {0}", 
-                            policy.PolicyId);
-
-                        continue;
-                    }
-               }
-                
                 // create a validator for a certificate token policy.
                 if (policy.TokenType == UserTokenType.Certificate)
                 {
-                    // the name of the element in the configuration file.
-                    XmlQualifiedName qname = new XmlQualifiedName(policy.PolicyId, Namespaces.OpcUa);
-                    
-                    // find the location of the trusted issuers.
-                    CertificateTrustList trustedIssuers = configuration.ParseExtension<CertificateTrustList>(qname);
-                    
-                    if (trustedIssuers == null)
+                    // check if user certificate trust lists are specified in configuration.
+                    if (configuration.SecurityConfiguration.TrustedUserCertificates != null &&
+                        configuration.SecurityConfiguration.UserIssuerCertificates != null)
                     {
-                        Utils.Trace(
-                            (int)Utils.TraceMasks.Error, 
-                            "Could not load CertificateTrustList for UserTokenPolicy {0}", 
-                            policy.PolicyId);
+                        CertificateValidator certificateValidator = new CertificateValidator();
+                        certificateValidator.Update(configuration.SecurityConfiguration).Wait();
+                        certificateValidator.Update(configuration.SecurityConfiguration.UserIssuerCertificates,
+                            configuration.SecurityConfiguration.TrustedUserCertificates,
+                            configuration.SecurityConfiguration.RejectedCertificateStore);
 
-                        continue;
+                        // set custom validator for user certificates.
+                        m_certificateValidator = certificateValidator.GetChannelValidator();
                     }
-
-                    // trusts any certificate in the trusted people store.
-                    m_certificateValidator = CertificateValidator.GetChannelValidator();
                 }
             }
         }
@@ -150,13 +119,13 @@ namespace Opc.Ua.Sample
                     "http://opcfoundation.org/UA/Sample/",
                     new LocalizedText(info)));
             }
-        }        
+        }
 
         /// <summary>
         /// Verifies that a certificate user token is trusted.
         /// </summary>
         private void VerifyCertificate(X509Certificate2 certificate)
-        {        
+        {
             try
             {
                 if (m_certificateValidator != null)
@@ -167,37 +136,44 @@ namespace Opc.Ua.Sample
                 {
                     CertificateValidator.Validate(certificate);
                 }
-
-                // determine if self-signed.
-                bool isSelfSigned = Utils.CompareDistinguishedName(certificate.Subject, certificate.Issuer);
-
-                // do not allow self signed application certs as user token
-                if (isSelfSigned && Utils.HasApplicationURN(certificate))
-                {
-                    throw new ServiceResultException(StatusCodes.BadCertificateUseNotAllowed);
-                }
             }
-            catch (Exception)
+            catch (Exception e)
             {
-                // construct translation object with default text.
-                TranslationInfo info = new TranslationInfo(
-                    "InvalidCertificate",
-                    "en-US",
-                    "'{0}' is not a trusted user certificate.",
-                    certificate.Subject);
+                TranslationInfo info;
+                StatusCode result = StatusCodes.BadIdentityTokenRejected;
+                ServiceResultException se = e as ServiceResultException;
+                if (se != null && se.StatusCode == StatusCodes.BadCertificateUseNotAllowed)
+                {
+                    info = new TranslationInfo(
+                        "InvalidCertificate",
+                        "en-US",
+                        "'{0}' is an invalid user certificate.",
+                        certificate.Subject);
+
+                    result = StatusCodes.BadIdentityTokenInvalid;
+                }
+                else
+                {
+                    // construct translation object with default text.
+                    info = new TranslationInfo(
+                        "UntrustedCertificate",
+                        "en-US",
+                        "'{0}' is not a trusted user certificate.",
+                        certificate.Subject);
+                }
 
                 // create an exception with a vendor defined sub-code.
                 throw new ServiceResultException(new ServiceResult(
-                    StatusCodes.BadIdentityTokenRejected,
-                    "InvalidCertificate",
+                    result,
+                    info.Key,
                     "http://opcfoundation.org/UA/Sample/",
                     new LocalizedText(info)));
             }
-        }     
+        }
         #endregion
         
         #region Private Fields
-        private X509CertificateValidator m_certificateValidator; 
+        private X509CertificateValidator m_certificateValidator;
         #endregion 
     }
 }

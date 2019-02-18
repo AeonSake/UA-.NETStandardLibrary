@@ -1,5 +1,5 @@
 /* ========================================================================
- * Copyright (c) 2005-2016 The OPC Foundation, Inc. All rights reserved.
+ * Copyright (c) 2005-2019 The OPC Foundation, Inc. All rights reserved.
  *
  * OPC Foundation MIT License 1.00
  * 
@@ -33,6 +33,7 @@ using System.Security.Cryptography.X509Certificates;
 using System.Threading;
 using System.IO;
 using System.Threading.Tasks;
+using System.Globalization;
 
 namespace Opc.Ua.Server
 {
@@ -340,7 +341,8 @@ namespace Opc.Ua.Server
                 {
                     try
                     {
-                        parsedClientCertificate = CertificateFactory.Create(clientCertificate, true);
+                        X509Certificate2Collection clientCertificateChain = Utils.ParseCertificateChainBlob(clientCertificate);
+                        parsedClientCertificate = clientCertificateChain[0];
 
                         if (context.SecurityPolicyUri != SecurityPolicies.None)
                         {
@@ -356,7 +358,7 @@ namespace Opc.Ua.Server
                                     "The URI specified in the ApplicationDescription does not match the URI in the Certificate.");
                             }
 
-                            CertificateValidator.Validate(parsedClientCertificate);
+                            CertificateValidator.Validate(clientCertificateChain);
                         }
                     }
                     catch (Exception e)
@@ -394,29 +396,44 @@ namespace Opc.Ua.Server
                     out sessionId,
                     out authenticationToken,
                     out serverNonce,
-                    out revisedSessionTimeout);           
-                                
+                    out revisedSessionTimeout);
+
                 lock (m_lock)
-                {                
+                {
                     // return the application instance certificate for the server.
                     if (requireEncryption)
                     {
-                        serverCertificate = InstanceCertificate.RawData;
+                        // check if complete chain should be sent.
+                        if (Configuration.SecurityConfiguration.SendCertificateChain && InstanceCertificateChain != null && InstanceCertificateChain.Count >0)
+                        {
+                            List<byte> serverCertificateChain = new List<byte>();
+
+                            for (int i = 0; i < InstanceCertificateChain.Count; i++)
+                            {
+                                serverCertificateChain.AddRange(InstanceCertificateChain[i].RawData);
+                            }
+
+                            serverCertificate = serverCertificateChain.ToArray();
+                        }
+                        else
+                        {
+                            serverCertificate = InstanceCertificate.RawData;
+                        }
                     }
-                                 
+
                     // return the endpoints supported by the server.
                     serverEndpoints = GetEndpointDescriptions(endpointUrl, BaseAddresses, null);
 
                     // return the software certificates assigned to the server.
                     serverSoftwareCertificates = new SignedSoftwareCertificateCollection(ServerProperties.SoftwareCertificates);
-                    
+
                     // sign the nonce provided by the client.
                     serverSignature = null;
-                    
+
                     //  sign the client nonce (if provided).
                     if (parsedClientCertificate != null && clientNonce != null)
                     {
-                        byte[] dataToSign = Utils.Append(clientCertificate, clientNonce);
+                        byte[] dataToSign = Utils.Append(parsedClientCertificate.RawData, clientNonce);
                         serverSignature = SecurityPolicies.Sign(InstanceCertificate, context.SecurityPolicyUri, dataToSign);
                     }
                 }
@@ -673,11 +690,6 @@ namespace Opc.Ua.Server
             }
             catch (ServiceResultException e)
             {
-                if (e.StatusCode == StatusCodes.BadSessionNotActivated)
-                {
-                    return CreateResponse(requestHeader, e);
-                }
-
                 lock (ServerInternal.DiagnosticsWriteLock)
                 {
                     ServerInternal.ServerDiagnostics.RejectedRequestsCount++;
@@ -1408,7 +1420,7 @@ namespace Opc.Ua.Server
                 }
                 */
                 
-                Utils.Trace("PUBLISH #{0} RECIEVED. TIME={1:hh:mm:ss.fff}", requestHeader.RequestHandle, requestHeader.Timestamp);
+                Utils.Trace("PUBLISH #{0} RECEIVED. TIME={1:hh:mm:ss.fff}", requestHeader.RequestHandle, requestHeader.Timestamp);
                 
                 notificationMessage = ServerInternal.SubscriptionManager.Publish(
                     context,
@@ -2187,7 +2199,11 @@ namespace Opc.Ua.Server
                                     ExtensionObjectCollection discoveryConfiguration = new ExtensionObjectCollection();
                                     StatusCodeCollection configurationResults = null;
                                     DiagnosticInfoCollection diagnosticInfos = null;
-
+                                    MdnsDiscoveryConfiguration mdnsDiscoveryConfig = new MdnsDiscoveryConfiguration();
+                                    mdnsDiscoveryConfig.ServerCapabilities = configuration.ServerConfiguration.ServerCapabilities;
+                                    mdnsDiscoveryConfig.MdnsServerName = Utils.GetHostName();
+                                    ExtensionObject extensionObject = new ExtensionObject(mdnsDiscoveryConfig);
+                                    discoveryConfiguration.Add(extensionObject);
                                     client.RegisterServer2(
                                         requestHeader,
                                         m_registrationInfo,
@@ -2678,11 +2694,11 @@ namespace Opc.Ua.Server
             serverDescription = new ApplicationDescription();
 
             serverDescription.ApplicationUri = configuration.ApplicationUri;
-            serverDescription.ApplicationName = configuration.ApplicationName;
+            serverDescription.ApplicationName = new LocalizedText("en-US", configuration.ApplicationName);
             serverDescription.ApplicationType = configuration.ApplicationType;
             serverDescription.ProductUri = configuration.ProductUri;
             serverDescription.DiscoveryUrls = GetDiscoveryUrls();
-                          
+
             endpoints = new EndpointDescriptionCollection();
             IList<EndpointDescription> endpointsForHost = null;
 
@@ -2830,9 +2846,9 @@ namespace Opc.Ua.Server
                         {
                             endpoint = new EndpointDescription();
                             endpoint.EndpointUrl = Utils.Format(Utils.DiscoveryUrls[0], "localhost");
-                            endpoint.SecurityLevel = 0;
+                            endpoint.SecurityLevel = ServerSecurityPolicy.CalculateSecurityLevel(MessageSecurityMode.SignAndEncrypt, SecurityPolicies.Basic256Sha256);
                             endpoint.SecurityMode = MessageSecurityMode.SignAndEncrypt;
-                            endpoint.SecurityPolicyUri = SecurityPolicies.Basic128Rsa15;
+                            endpoint.SecurityPolicyUri = SecurityPolicies.Basic256Sha256;
                             endpoint.Server.ApplicationType = ApplicationType.DiscoveryServer;
                         }
 
@@ -2866,6 +2882,8 @@ namespace Opc.Ua.Server
                         m_configurationWatcher = new ConfigurationWatcher(configuration);
                         m_configurationWatcher.Changed += new EventHandler<ConfigurationWatcherEventArgs>(this.OnConfigurationChanged);
                     }
+
+                    CertificateValidator.CertificateUpdate += OnCertificateUpdate;
                 }
                 catch (Exception e)
                 {
@@ -2883,6 +2901,8 @@ namespace Opc.Ua.Server
         /// </summary>
         protected override void OnServerStopping()
         {
+            ShutDownDelay();
+
             // halt any outstanding timer.
             lock (m_registrationLock)
             {
@@ -2925,6 +2945,41 @@ namespace Opc.Ua.Server
                     Utils.SilentDispose(m_serverInternal);
                     m_serverInternal = null;
                 }
+            }
+        }
+
+        /// <summary>
+        /// Implements the server shutdown delay if session are connected.
+        /// </summary>
+        protected void ShutDownDelay()
+        {
+            try
+            {
+                // check for connected clients
+                IList<Session> currentessions = this.ServerInternal.SessionManager.GetSessions();
+
+                if (currentessions.Count > 0)
+                {
+                    // provide some time for the connected clients to detect the shutdown state.
+                    ServerInternal.Status.Value.ShutdownReason = new LocalizedText("en-US", "Application closed.");
+                    ServerInternal.Status.Variable.ShutdownReason.Value = new LocalizedText("en-US", "Application closed.");
+                    ServerInternal.Status.Value.State = ServerState.Shutdown;
+                    ServerInternal.Status.Variable.State.Value = ServerState.Shutdown;
+                    ServerInternal.Status.Variable.ClearChangeMasks(ServerInternal.DefaultSystemContext, true);
+
+                    for (int timeTillShutdown = Configuration.ServerConfiguration.ShutdownDelay; timeTillShutdown > 0; timeTillShutdown--)
+                    {
+                        ServerInternal.Status.Value.SecondsTillShutdown = (uint)timeTillShutdown;
+                        ServerInternal.Status.Variable.SecondsTillShutdown.Value = (uint)timeTillShutdown;
+                        ServerInternal.Status.Variable.ClearChangeMasks(ServerInternal.DefaultSystemContext, true);
+
+                        Thread.Sleep(1000);
+                    }
+                }
+            }
+            catch
+            {
+                // ignore error during shutdown procedure.
             }
         }
 
@@ -3074,9 +3129,9 @@ namespace Opc.Ua.Server
         {
             // may be overridden by the subclass.
         }
-#endregion
+        #endregion
 
-#region Private Fields
+        #region Private Fields
         private object m_lock = new object();    
         private ServerInternalData m_serverInternal;
         private ConfigurationWatcher m_configurationWatcher;

@@ -1,5 +1,5 @@
 /* ========================================================================
- * Copyright (c) 2005-2013 The OPC Foundation, Inc. All rights reserved.
+ * Copyright (c) 2005-2019 The OPC Foundation, Inc. All rights reserved.
  *
  * OPC Foundation MIT License 1.00
  * 
@@ -76,13 +76,18 @@ namespace Opc.Ua.Com
             certificate = CertificateFactory.CreateCertificate(
                 id.StoreType,
                 id.StorePath,
+                null,
                 configuration.ApplicationUri,
                 configuration.ApplicationName,
                 subjectName,
                 hostNames,
                 2048,
+                DateTime.UtcNow - TimeSpan.FromHours(1),
                 120,
-                256);
+                256,
+                false,
+                null,
+                null);
 
             // update and save the configuration file.
             id.Certificate = certificate;
@@ -105,7 +110,7 @@ namespace Opc.Ua.Com
             }
 
             // tell the certificate validator about the new certificate.
-            configuration.CertificateValidator.Update(configuration.SecurityConfiguration);
+            configuration.CertificateValidator.Update(configuration.SecurityConfiguration).Wait();
 
         }
 

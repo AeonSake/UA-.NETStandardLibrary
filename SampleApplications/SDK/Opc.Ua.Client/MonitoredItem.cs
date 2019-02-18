@@ -1,5 +1,5 @@
 /* ========================================================================
- * Copyright (c) 2005-2016 The OPC Foundation, Inc. All rights reserved.
+ * Copyright (c) 2005-2019 The OPC Foundation, Inc. All rights reserved.
  *
  * OPC Foundation MIT License 1.00
  * 
@@ -491,7 +491,7 @@ namespace Opc.Ua.Client
         }
         
         /// <summary>
-        /// The last value or event recieved from the server.
+        /// The last value or event received from the server.
         /// </summary>
         public IEncodeable LastValue
         {
@@ -607,7 +607,7 @@ namespace Opc.Ua.Client
                         // validate SourceTimestamp of the notification.
                         if (datachange.Value != null && datachange.Value.SourceTimestamp > DateTime.UtcNow)
                         {
-                            Utils.Trace("Received SourceTimestamp {0} is in the future for MonitoredItemId {1}", datachange.Value.ServerTimestamp.ToLocalTime(), ClientHandle);
+                            Utils.Trace("Received SourceTimestamp {0} is in the future for MonitoredItemId {1}", datachange.Value.SourceTimestamp.ToLocalTime(), ClientHandle);
                         }
 
                         if (datachange.Value != null && datachange.Value.StatusCode.Overflow)
@@ -929,7 +929,7 @@ namespace Opc.Ua.Client
 
             NotificationMessage message = datachange.Message;
 
-            if (message != null)
+            if (message == null)
             {
                 return null;
             }
@@ -951,7 +951,7 @@ namespace Opc.Ua.Client
 
             NotificationMessage message = eventFields.Message;
 
-            if (message != null)
+            if (message == null)
             {
                 return null;
             }
